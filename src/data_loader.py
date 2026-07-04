@@ -127,10 +127,10 @@ def preprocess_data():
     valid_tokens = replace_rare_words(valid_tokens, vocab)
     test_tokens = replace_rare_words(test_tokens, vocab)
 
-    # 转换为 ID
-    train_ids = tokens_to_ids(train_tokens, vocab)
-    valid_ids = tokens_to_ids(valid_tokens, vocab)
-    test_ids = tokens_to_ids(test_tokens, vocab)
+    # 转换为 ID (转为 numpy 数组，因为 batch_generator 需要 .reshape())
+    train_ids = np.array(tokens_to_ids(train_tokens, vocab), dtype=np.int64)
+    valid_ids = np.array(tokens_to_ids(valid_tokens, vocab), dtype=np.int64)
+    test_ids = np.array(tokens_to_ids(test_tokens, vocab), dtype=np.int64)
 
     # 保存
     print("  - 保存处理后的数据...")
