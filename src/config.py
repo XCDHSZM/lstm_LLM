@@ -46,7 +46,7 @@ class MediumConfig:
     max_grad_norm = 5.0
     lr = 1.0
     lr_decay = 0.8
-    max_epoch = 39
+    max_epoch = 50
     lr_decay_epoch = 6
     vocab_size = 10000
     embedding_size = 650
