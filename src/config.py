@@ -31,6 +31,8 @@ class SmallConfig:
     lr_decay_epoch = 4      # 每多少个 epoch 学习率衰减
     vocab_size = 10000      # 词典大小
     embedding_size = 200    # 词向量维度
+    log_interval = 50       # 每 N 步打印一次训练 loss
+    save_every = 1          # 每 N 个 epoch 保存一次模型
 
 
 class MediumConfig:
@@ -48,6 +50,8 @@ class MediumConfig:
     lr_decay_epoch = 6
     vocab_size = 10000
     embedding_size = 650
+    log_interval = 100
+    save_every = 1
 
 
 class LargeConfig:
@@ -65,6 +69,8 @@ class LargeConfig:
     lr_decay_epoch = 14
     vocab_size = 10000
     embedding_size = 1500
+    log_interval = 200
+    save_every = 1
 
 
 # ============ 选择当前配置 ============
