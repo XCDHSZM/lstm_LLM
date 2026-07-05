@@ -123,7 +123,7 @@ class OptimizedMediumConfig:
     optimizer = "sgd"
     sgd_lr = 15.0                # 保持大学习率，提供跳出局部最优的动能
     lr_decay = 0.85              
-    lr_decay_epoch = 1
+    lr_decay_epoch = 15
 
     # ========== 训练 ==========
     # max_epoch = 100              # 足够长的训练
@@ -131,7 +131,7 @@ class OptimizedMediumConfig:
     # min_lr = 1e-6                # 余弦退火的最终学习率
     # max_grad_norm = 5.0          # 梯度截断
 
-    max_epoch = 60               
+    max_epoch = 100              # 足够长的训练
     warmup_epochs = 0
     max_grad_norm = 0.25
     # ========== 硬件 ==========
