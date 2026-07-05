@@ -106,7 +106,7 @@ class OptimizedMediumConfig:
     hidden_size = 650
     num_layers = 2
     embedding_size = 650         # 与 hidden_size 一致 (weight tying 要求)
-    dropout = 0.65
+    dropout = 0.70
     init_scale = 0.05
     use_weight_tying = True      # 启用 Weight Tying (减少参数, 提升泛化)
 
