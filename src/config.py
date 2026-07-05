@@ -98,7 +98,7 @@ class OptimizedMediumConfig:
       - 更长训练：100 epochs 确保充分收敛
     """
     # ========== 数据 ==========
-    batch_size = 64              # 增大 batch 利用 GPU 显存 (T4 16GB 绰绰有余)
+    batch_size = 20              
     num_steps = 35               # BPTT 展开步数 (与论文一致)
     vocab_size = 10000
 
@@ -106,7 +106,7 @@ class OptimizedMediumConfig:
     hidden_size = 650
     num_layers = 2
     embedding_size = 650         # 与 hidden_size 一致 (weight tying 要求)
-    dropout = 0.65
+    dropout = 0.50
     init_scale = 0.05
     use_weight_tying = True      # 启用 Weight Tying (减少参数, 提升泛化)
 
@@ -121,9 +121,9 @@ class OptimizedMediumConfig:
     # lr_decay_epoch = 6
     # ========== 优化器 ==========
     optimizer = "sgd"
-    sgd_lr = 15.0                # 保持大学习率，提供跳出局部最优的动能
+    sgd_lr = 10.0                # 保持大学习率，提供跳出局部最优的动能
     lr_decay = 0.85              
-    lr_decay_epoch = 30
+    lr_decay_epoch = 15
 
     # ========== 训练 ==========
     # max_epoch = 100              # 足够长的训练
@@ -131,7 +131,7 @@ class OptimizedMediumConfig:
     # min_lr = 1e-6                # 余弦退火的最终学习率
     # max_grad_norm = 5.0          # 梯度截断
 
-    max_epoch = 100              # 足够长的训练
+    max_epoch = 60              # 足够长的训练
     warmup_epochs = 0
     max_grad_norm = 0.25
     # ========== 硬件 ==========
