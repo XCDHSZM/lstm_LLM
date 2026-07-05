@@ -216,8 +216,8 @@ class LSTMLanguageModelTied(nn.Module):
         return (h, c)
 
 
-# 默认模型类
-Model = LSTMLanguageModel
+# 默认模型类 — 默认使用 Weight Tying 减少参数、提升泛化
+Model = LSTMLanguageModelTied
 
 
 if __name__ == "__main__":

@@ -17,8 +17,31 @@ from config import (
     TRAIN_IDS, VALID_IDS, TEST_IDS, VOCAB_FILE,
 )
 from data_loader import load_processed, preprocess_data, batch_generator
-from model import Model
+from model import Model, LSTMLanguageModel, LSTMLanguageModelTied
 
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+def detach_hidden(hidden):
+    """截断梯度传播。"""
+    if hidden is None:
+        return None
+    h, c = hidden
+    return (h.detach(), c.detach())
+
+
+def init_hidden(batch_size, hidden_size, num_layers, device):
+    """初始化零隐状态。"""
+    h = torch.zeros(num_layers, batch_size, hidden_size, device=device)
+    c = torch.zeros(num_layers, batch_size, hidden_size, device=device)
+    return (h, c)
+
+
+# ============================================================
+# 评估
+# ============================================================
 
 def evaluate_model(model, data, batch_size, num_steps, device="cpu"):
     """
@@ -37,20 +60,24 @@ def evaluate_model(model, data, batch_size, num_steps, device="cpu"):
     model.eval()
     criterion = nn.CrossEntropyLoss()
 
+    # 获取模型参数（兼容 DataParallel）
+    m = model.module if hasattr(model, "module") else model
+
     total_loss = 0.0
     num_batches = 0
-    hidden = model.init_hidden(batch_size, device)
+    hidden = init_hidden(batch_size, m.hidden_size, m.num_layers, device)
 
     with torch.no_grad():
         for inputs, targets in batch_generator(data, batch_size, num_steps, device):
             # 截断 BPTT
-            hidden = model.detach_hidden(hidden)
+            hidden = detach_hidden(hidden)
 
             # 前向传播
             logits, hidden = model(inputs, hidden)
 
             # 计算 loss
-            logits = logits.reshape(-1, model.vocab_size)
+            vocab_size = logits.size(-1)
+            logits = logits.reshape(-1, vocab_size)
             targets = targets.reshape(-1)
             loss = criterion(logits, targets)
 
@@ -62,6 +89,10 @@ def evaluate_model(model, data, batch_size, num_steps, device="cpu"):
 
     return avg_loss, avg_ppl
 
+
+# ============================================================
+# 从检查点评估
+# ============================================================
 
 def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
     """
@@ -75,24 +106,24 @@ def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
     if not os.path.exists(checkpoint_path):
         print(f"错误: 找不到检查点文件 {checkpoint_path}")
         print("请先运行 train.py 训练模型。")
-        return
+        return None, None
 
     print(f"加载模型: {checkpoint_path}")
 
     # 加载检查点
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # 从检查点获取配置
+    # 从检查点获取配置（兼容新旧格式）
     if "config" in checkpoint:
         ckpt_config = checkpoint["config"]
     else:
-        # 回退到默认配置
         ckpt_config = {
             "vocab_size": config.vocab_size,
             "embedding_size": config.embedding_size,
             "hidden_size": config.hidden_size,
             "num_layers": config.num_layers,
             "dropout": config.dropout,
+            "use_weight_tying": config.use_weight_tying if hasattr(config, "use_weight_tying") else False,
         }
 
     # 如果检查点保存了词表，使用它
@@ -100,7 +131,6 @@ def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
         vocab = checkpoint["vocab"]
         vocab_size = len(vocab)
     else:
-        # 尝试从文件加载
         vocab_path = os.path.join(PROCESSED_DATA_DIR, VOCAB_FILE)
         if os.path.exists(vocab_path):
             vocab = json.load(open(vocab_path, "r", encoding="utf-8"))
@@ -114,8 +144,15 @@ def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
     print(f"  - 训练 PPL: {checkpoint.get('train_ppl', 'N/A')}")
     print(f"  - 验证 PPL: {checkpoint.get('valid_ppl', 'N/A')}")
 
+    # 根据配置选择模型类型
+    use_weight_tying = ckpt_config.get("use_weight_tying", False)
+    if use_weight_tying:
+        ModelClass = LSTMLanguageModelTied
+    else:
+        ModelClass = LSTMLanguageModel
+
     # 构建模型
-    model = Model(
+    model = ModelClass(
         vocab_size=vocab_size,
         embedding_size=ckpt_config["embedding_size"],
         hidden_size=ckpt_config["hidden_size"],
@@ -124,6 +161,7 @@ def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
     ).to(device)
 
     model.load_state_dict(checkpoint["model_state_dict"])
+    print(f"模型类型: {'Weight Tying' if use_weight_tying else 'Standard'} LSTM")
     print(f"模型参数量: {sum(p.numel() for p in model.parameters()):,}")
 
     # 确保数据已预处理
@@ -157,23 +195,6 @@ def evaluate_from_checkpoint(checkpoint_name: str = "best_model.pt"):
     return valid_ppl, test_ppl
 
 
-def evaluate_all_splits():
-    """
-    在验证集和测试集上都进行评估（不加载检查点，需要先有预处理数据）。
-    用于在训练过程中快速手动评估。
-    """
-    # 确保数据已预处理
-    _, valid_ids, test_ids, vocab = preprocess_data()
-
-    # 尝试加载最佳模型
-    checkpoint_path = os.path.join(MODEL_DIR, "best_model.pt")
-    if not os.path.exists(checkpoint_path):
-        print(f"错误: 找不到 {checkpoint_path}")
-        return
-
-    return evaluate_from_checkpoint("best_model.pt")
-
-
 def quick_evaluate(model, data_name="valid"):
     """
     快速评估函数 —— 可在训练脚本中直接调用。
@@ -205,6 +226,16 @@ if __name__ == "__main__":
         "--checkpoint", type=str, default="best_model.pt",
         help="检查点文件名 (默认: best_model.pt)"
     )
+    parser.add_argument(
+        "--batch-size", type=int, default=None,
+        help="评估用 batch size (默认: 使用 config 中的值)"
+    )
     args = parser.parse_args()
+
+    # 允许命令行覆盖 batch_size
+    if args.batch_size is not None:
+        eval_bs = args.batch_size
+    else:
+        eval_bs = config.batch_size
 
     evaluate_from_checkpoint(args.checkpoint)

@@ -47,6 +47,12 @@ def main():
         preprocess_data()
 
     elif args.mode == "train":
+        from config import config as cfg
+        print(f"\n当前配置: {type(cfg).__name__}")
+        print(f"  优化器: {cfg.optimizer.upper()}")
+        print(f"  Weight Tying: {'Yes' if cfg.use_weight_tying else 'No'}")
+        print(f"  AMP: {'Yes' if cfg.use_amp else 'No'}")
+        print(f"  Batch Size: {cfg.batch_size}, Epochs: {cfg.max_epoch}\n")
         from train import train
         train()
 
