@@ -10,7 +10,21 @@ LSTM 的 forget gate bias 初始化为 1.0（推荐做法）。
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.autograd as autograd
+class LockedDropout(nn.Module):
+    def __init__(self):
+        super().__init__()
 
+    def forward(self, x, dropout=0.5):
+        if not self.training or not dropout:
+            return x
+        # x 的形状是 [batch_size, seq_len, hidden_size]
+        # 我们生成一个 [batch_size, 1, hidden_size] 的掩码
+        m = x.data.new(x.size(0), 1, x.size(2)).bernoulli_(1 - dropout)
+        mask = autograd.Variable(m, requires_grad=False) / (1 - dropout)
+        # 将掩码广播到所有时间步
+        mask = mask.expand_as(x)
+        return mask * x
 
 class LSTMLanguageModel(nn.Module):
     """
@@ -162,22 +176,23 @@ class LSTMLanguageModelTied(nn.Module):
             f"Weight tying requires embedding_size ({embedding_size}) == hidden_size ({hidden_size})"
 
         self.embedding = nn.Embedding(vocab_size, embedding_size)
-        self.embed_dropout = nn.Dropout(dropout)
 
+        # self.embed_dropout = nn.Dropout(dropout)
+        self.locked_drop = LockedDropout()
         self.lstm = nn.LSTM(
             input_size=embedding_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
-            dropout=dropout if num_layers > 1 else 0.0,
+            # 注意：LSTM 层间的 dropout 还是用原生的，LockedDropout 用在输入和输出上
+            dropout=dropout if num_layers > 1 else 0.0, 
             batch_first=True,
         )
 
-        self.output_dropout = nn.Dropout(dropout)
+        # self.output_dropout = nn.Dropout(dropout)
 
         # 使用 embedding 权重作为输出投影（weight tying）
         # 需要额外的 bias
         self.output_bias = nn.Parameter(torch.zeros(vocab_size))
-
         self._init_weights(init_scale)
 
     def _init_weights(self, init_scale: float):
@@ -194,10 +209,14 @@ class LSTMLanguageModelTied(nn.Module):
         batch_size, seq_len = input_ids.shape
 
         emb = self.embedding(input_ids)
-        emb = self.embed_dropout(emb)
+        
+        # 替换点 2：在 Embedding 后使用 LockedDropout，并传入 dropout 概率
+        emb = self.locked_drop(emb, self.dropout_rate)
 
         lstm_out, hidden = self.lstm(emb, hidden)
-        lstm_out = self.output_dropout(lstm_out)
+        
+        # 替换点 3：在 LSTM 输出后也使用 LockedDropout
+        lstm_out = self.locked_drop(lstm_out, self.dropout_rate)
 
         # Weight tying: 用 embedding 权重矩阵的转置做输出投影
         logits = F.linear(lstm_out, self.embedding.weight, self.output_bias)

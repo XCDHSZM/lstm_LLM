@@ -45,7 +45,7 @@ class MediumConfig:
     num_steps = 35
     hidden_size = 650
     num_layers = 2
-    dropout = 0.5
+    dropout = 0.6
     init_scale = 0.05
     max_grad_norm = 5.0
     lr = 1.0
@@ -106,14 +106,14 @@ class OptimizedMediumConfig:
     hidden_size = 650
     num_layers = 2
     embedding_size = 650         # 与 hidden_size 一致 (weight tying 要求)
-    dropout = 0.5
+    dropout = 0.65
     init_scale = 0.05
     use_weight_tying = True      # 启用 Weight Tying (减少参数, 提升泛化)
 
     # ========== 优化器 (AdamW) ==========
     optimizer = "adamw"          # "adamw" | "sgd"
     lr = 0.001                   # AdamW 峰值学习率
-    weight_decay = 1e-5          # 权重衰减 (轻微正则化)
+    weight_decay = 0.01        # 权重衰减 (轻微正则化)
     betas = (0.9, 0.999)         # Adam 动量参数
     # SGD 回退参数 (当 optimizer="sgd" 时生效)
     sgd_lr = 1.0
