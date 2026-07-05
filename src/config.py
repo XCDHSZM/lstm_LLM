@@ -175,30 +175,24 @@ class OptimizedLargeConfig:
     embedding_size = 1500         # 论文: embedding=hidden, 但不用 tying
     dropout = 0.65                # 论文 Large 原值
     init_scale = 0.04             # 论文 Large 原值
-    use_weight_tying = False      # ★ 关键: 不用 weight tying!
+    use_weight_tying = True    # ★ 关键: 不用 weight tying!
     # Weight Tying + SGD lr=1.0 会导致 Embedding 梯度爆炸
     # 详见: Press & Wolf (2016) 指出 tying 需要专门的优化策略
 
-    # ========== 优化器 (SGD, 论文原版) ==========
+    # ========== 优化器 ==========
     optimizer = "sgd"
-    sgd_lr = 1.0                  # 论文原值
-    lr_decay = 0.87                # 每轮衰减 ×0.5
-    lr_decay_epoch = 14           # 每 14 个 epoch 衰减
-    # AdamW 回退
-    lr = 0.001
-    weight_decay = 1e-5
-    betas = (0.9, 0.999)
+    sgd_lr = 20.0                # 配合大模型的强劲初始学习率
+    lr_decay = 0.85              
+    lr_decay_epoch = 15          # 前 15 轮不衰减，全速收敛
 
     # ========== 训练 ==========
-    max_epoch = 55                # 论文原值
-    warmup_epochs = 0             # 论文无 warmup
-    warmup_start_lr = 1.0         # 直接从 1.0 开始
-    min_lr = 1e-6
-    max_grad_norm = 10.0          # 论文 Large 原值
+    max_epoch = 55               
+    warmup_epochs = 0            
+    max_grad_norm = 10.0         # ★ 大模型允许更大的梯度波动，截断阈值调宽到 10.0
 
     # ========== ASGD (微调增强) ==========
     use_asgd = True
-    asgd_start_epoch = 46         # 在最后 LR 阶段开始平均
+    asgd_start_epoch = 40         # 在最后 LR 阶段开始平均
 
     # ========== 硬件 ==========
     use_amp = True                # T4 支持 FP16
@@ -214,8 +208,8 @@ class OptimizedLargeConfig:
 # config = SmallConfig()
 # config = MediumConfig()
 # config = LargeConfig()
-config = OptimizedMediumConfig()
-# config = OptimizedLargeConfig()
+# config = OptimizedMediumConfig()
+config = OptimizedLargeConfig()
 
 
 # ============ 训练通用设置 ============
