@@ -15,8 +15,15 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
+
+# AMP 导入兼容不同 PyTorch 版本
+try:
+    from torch.amp import autocast, GradScaler
+    AMP_DEVICE = "cuda"
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler
+    AMP_DEVICE = None
 
 from config import config, MODEL_DIR, device
 from data_loader import preprocess_data, batch_generator
@@ -40,7 +47,7 @@ def get_model_attribute(model, attr_name):
     raise AttributeError(f"模型没有 '{attr_name}' 属性")
 
 
-def compute_loss(model, batch, hidden, criterion, use_amp=False):
+def compute_loss(model, batch, hidden, criterion):
     """
     计算单个 batch 的损失。
 
@@ -49,7 +56,6 @@ def compute_loss(model, batch, hidden, criterion, use_amp=False):
         batch: (input, target) 元组
         hidden: 隐状态
         criterion: 损失函数
-        use_amp: 是否使用 AMP 自动混合精度
 
     Returns:
         loss, hidden (detached)
@@ -127,8 +133,8 @@ def train_epoch(model, data, optimizer, criterion, scaler,
         optimizer.zero_grad()
 
         # AMP 前向传播
-        with autocast(enabled=use_amp):
-            loss, hidden = compute_loss(model, batch, hidden, criterion, use_amp)
+        with autocast(AMP_DEVICE, enabled=use_amp):
+            loss, hidden = compute_loss(model, batch, hidden, criterion)
 
         # 反向传播（AMP 自动缩放）
         if scaler:
@@ -176,7 +182,7 @@ def evaluate(model, data, batch_size, num_steps, hidden_size, num_layers, device
 
     for batch in batch_generator(data, batch_size, num_steps, device):
         hidden = detach_hidden(hidden)
-        loss, hidden = compute_loss(model, batch, hidden, criterion, use_amp=False)
+        loss, hidden = compute_loss(model, batch, hidden, criterion)
         total_loss += loss.item()
         num_batches += 1
 
@@ -274,10 +280,12 @@ def train():
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"\n模型参数量: {total_params:,} (trainable: {trainable_params:,})")
 
-    # ========== 检查多 GPU ==========
+    # ========== GPU 信息 ==========
     if torch.cuda.device_count() > 1:
-        print(f"检测到 {torch.cuda.device_count()} 块 GPU，启用 DataParallel")
-        model = nn.DataParallel(model)
+        print(f"检测到 {torch.cuda.device_count()} 块 GPU")
+        print("  注意: DataParallel 与 LSTM 隐状态传递不兼容，将使用单 GPU 训练")
+        print(f"  当前 batch_size={config.batch_size} 足以充分利用单块 T4 显存")
+        print(f"  如需利用多 GPU，建议使用 DistributedDataParallel (需要 torchrun)")
 
     # ========== 损失函数 & 优化器 ==========
     criterion = nn.CrossEntropyLoss()
@@ -305,9 +313,11 @@ def train():
 
     # AMP 混合精度 (仅 CUDA 可用)
     use_amp = config.use_amp and device == "cuda"
-    scaler = GradScaler() if use_amp else None
     if use_amp:
+        scaler = GradScaler(AMP_DEVICE) if AMP_DEVICE else GradScaler()
         print("  AMP 混合精度已启用")
+    else:
+        scaler = None
 
     # ========== 训练循环 ==========
     best_valid_ppl = float("inf")
