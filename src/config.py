@@ -111,21 +111,29 @@ class OptimizedMediumConfig:
     use_weight_tying = True      # 启用 Weight Tying (减少参数, 提升泛化)
 
     # ========== 优化器 (AdamW) ==========
-    optimizer = "adamw"          # "adamw" | "sgd"
-    lr = 0.001                   # AdamW 峰值学习率
-    weight_decay = 0.01        # 权重衰减 (轻微正则化)
-    betas = (0.9, 0.999)         # Adam 动量参数
-    # SGD 回退参数 (当 optimizer="sgd" 时生效)
-    sgd_lr = 1.0
-    lr_decay = 0.5
-    lr_decay_epoch = 6
+    # optimizer = "adamw"          # "adamw" | "sgd"
+    # lr = 0.001                   # AdamW 峰值学习率
+    # weight_decay = 0.01        # 权重衰减 (轻微正则化)
+    # betas = (0.9, 0.999)         # Adam 动量参数
+    # # SGD 回退参数 (当 optimizer="sgd" 时生效)
+    # sgd_lr = 1.0
+    # lr_decay = 0.5
+    # lr_decay_epoch = 6
+    # ========== 优化器 ==========
+    optimizer = "sgd"
+    sgd_lr = 15.0                # 保持大学习率，提供跳出局部最优的动能
+    lr_decay = 0.85              
+    lr_decay_epoch = 1
 
     # ========== 训练 ==========
-    max_epoch = 100              # 足够长的训练
-    warmup_epochs = 5            # 前 5 个 epoch 线性增加 LR
-    min_lr = 1e-6                # 余弦退火的最终学习率
-    max_grad_norm = 5.0          # 梯度截断
+    # max_epoch = 100              # 足够长的训练
+    # warmup_epochs = 5            # 前 5 个 epoch 线性增加 LR
+    # min_lr = 1e-6                # 余弦退火的最终学习率
+    # max_grad_norm = 5.0          # 梯度截断
 
+    max_epoch = 60               
+    warmup_epochs = 0
+    max_grad_norm = 0.25
     # ========== 硬件 ==========
     use_amp = True               # 自动混合精度 (T4 支持 FP16)
 
