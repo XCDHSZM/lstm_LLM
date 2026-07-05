@@ -179,16 +179,22 @@ class OptimizedLargeConfig:
     # Weight Tying + SGD lr=1.0 会导致 Embedding 梯度爆炸
     # 详见: Press & Wolf (2016) 指出 tying 需要专门的优化策略
 
-    # ========== 优化器 ==========
-    optimizer = "sgd"
-    sgd_lr = 20.0                # 配合大模型的强劲初始学习率
-    lr_decay = 0.85              
-    lr_decay_epoch = 15          # 前 15 轮不衰减，全速收敛
+    # ========== 优化器 (★ 核心修复：换回 AdamW 防止梯度爆炸) ==========
+    optimizer = "adamw"            
+    lr = 0.001                   # 恢复 AdamW 的正常学习率
+    weight_decay = 1e-4          # 加上轻微的权重衰减
+    betas = (0.9, 0.999)
+    
+    # sgd 回退参数 (忽略)
+    sgd_lr = 1.0
+    lr_decay = 0.5
+    lr_decay_epoch = 14
 
     # ========== 训练 ==========
     max_epoch = 55               
-    warmup_epochs = 0            
-    max_grad_norm = 10.0         # ★ 大模型允许更大的梯度波动，截断阈值调宽到 10.0
+    warmup_epochs = 5            # ★ 给出 5 个 epoch 的 Warmup，温柔起步，彻底杜绝初期爆炸
+    min_lr = 1e-6                
+    max_grad_norm = 5.0          # 恢复正常的梯度截断阈值
 
     # ========== ASGD (微调增强) ==========
     use_asgd = True
