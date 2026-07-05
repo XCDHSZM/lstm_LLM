@@ -226,19 +226,30 @@ def set_epoch_lr(optimizer, epoch, warmup_epochs, warmup_start_lr, sgd_lr,
 
     在每个 epoch 开始前调用，精确控制学习率。
     """
-    if epoch <= warmup_epochs:
-        # 线性 warmup: warmup_start_lr → sgd_lr
-        progress = epoch / max(1, warmup_epochs)
-        lr = warmup_start_lr + (sgd_lr - warmup_start_lr) * progress
+    if epoch <= lr_decay_epoch:
+        # 前 14 个 epoch 保持 1.0
+        lr = sgd_lr
     else:
-        # StepLR: 每 lr_decay_epoch 减半
-        effective_epoch = epoch - warmup_epochs - 1  # warmup 结束后的第一个完整 epoch 开始 decay
-        num_decays = effective_epoch // lr_decay_epoch
-        lr = sgd_lr * (lr_decay ** max(0, num_decays))
+        # 第 15 个 epoch 开始，每轮指数衰减
+        num_decays = epoch - lr_decay_epoch
+        lr = sgd_lr * (lr_decay ** num_decays)
 
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr
     return lr
+    # if epoch <= warmup_epochs:
+    #     # 线性 warmup: warmup_start_lr → sgd_lr
+    #     progress = epoch / max(1, warmup_epochs)
+    #     lr = warmup_start_lr + (sgd_lr - warmup_start_lr) * progress
+    # else:
+    #     # StepLR: 每 lr_decay_epoch 减半
+    #     effective_epoch = epoch - warmup_epochs - 1  # warmup 结束后的第一个完整 epoch 开始 decay
+    #     num_decays = effective_epoch // lr_decay_epoch
+    #     lr = sgd_lr * (lr_decay ** max(0, num_decays))
+
+    # for param_group in optimizer.param_groups:
+    #     param_group["lr"] = lr
+    # return lr
 
 
 # ============================================================

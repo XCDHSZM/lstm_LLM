@@ -174,7 +174,7 @@ class OptimizedLargeConfig:
     # ========== 优化器 (SGD, 论文原版) ==========
     optimizer = "sgd"
     sgd_lr = 1.0                  # 论文原值
-    lr_decay = 0.5                # 每轮衰减 ×0.5
+    lr_decay = 0.87                # 每轮衰减 ×0.5
     lr_decay_epoch = 14           # 每 14 个 epoch 衰减
     # AdamW 回退
     lr = 0.001
@@ -206,8 +206,8 @@ class OptimizedLargeConfig:
 # config = SmallConfig()
 # config = MediumConfig()
 # config = LargeConfig()
-# config = OptimizedMediumConfig()
-config = OptimizedLargeConfig()
+config = OptimizedMediumConfig()
+# config = OptimizedLargeConfig()
 
 
 # ============ 训练通用设置 ============
