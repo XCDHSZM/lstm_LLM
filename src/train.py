@@ -106,7 +106,7 @@ def get_lr(optimizer):
 
 def train_epoch(model, data, optimizer, criterion, scaler,
                 batch_size, num_steps, hidden_size, num_layers,
-                device, epoch):
+                device, epoch, asgd=None):
     """
     训练一个 epoch。
 
@@ -147,6 +147,10 @@ def train_epoch(model, data, optimizer, criterion, scaler,
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
             optimizer.step()
+
+        # ASGD: 每次 step 后更新参数平均
+        if asgd is not None:
+            asgd.update()
 
         total_loss += loss.item()
         num_batches += 1
@@ -196,40 +200,98 @@ def evaluate(model, data, batch_size, num_steps, hidden_size, num_layers, device
 # 学习率调度器
 # ============================================================
 
-def create_scheduler(optimizer, warmup_epochs, max_epoch, min_lr, initial_lr, optimizer_type="adamw"):
+def create_scheduler(optimizer, warmup_epochs, max_epoch, min_lr, initial_lr):
     """
-    创建学习率调度器。
+    创建 AdamW 学习率调度器: 线性 warmup → 余弦退火。
 
-    - AdamW: 线性 warmup → 余弦退火
-    - SGD: StepLR（原始论文方式）
+    SGD 不使用调度器，而是通过 set_epoch_lr() 在每个 epoch 手动设置 LR。
     """
-    if optimizer_type == "adamw":
-        # 线性 warmup + 余弦退火
-        # LambdaLR 的 lambda 函数接收 epoch (0-indexed)，返回乘数因子
-        # 实际 LR = initial_lr * lr_lambda(epoch)
-        lr_ratio = min_lr / max(initial_lr, 1e-12)
+    lr_ratio = min_lr / max(initial_lr, 1e-12)
 
-        def lr_lambda(epoch):
-            if epoch < warmup_epochs:
-                # 线性 warmup: 从 initial_lr/warmup_epochs 到 initial_lr
-                return (epoch + 1) / max(1, warmup_epochs)
-            else:
-                # 余弦退火: 从 initial_lr 衰减到 min_lr
-                progress = (epoch - warmup_epochs) / max(1, max_epoch - warmup_epochs)
-                cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
-                # 不要低于 min_lr / initial_lr 的比例
-                return max(lr_ratio, cosine_decay)
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return (epoch + 1) / max(1, warmup_epochs)
+        else:
+            progress = (epoch - warmup_epochs) / max(1, max_epoch - warmup_epochs)
+            cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+            return max(lr_ratio, cosine_decay)
 
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+def set_epoch_lr(optimizer, epoch, warmup_epochs, warmup_start_lr, sgd_lr,
+                 lr_decay, lr_decay_epoch):
+    """
+    SGD 手动 LR 控制: 线性 warmup → StepLR halving。
+
+    在每个 epoch 开始前调用，精确控制学习率。
+    """
+    if epoch <= warmup_epochs:
+        # 线性 warmup: warmup_start_lr → sgd_lr
+        progress = epoch / max(1, warmup_epochs)
+        lr = warmup_start_lr + (sgd_lr - warmup_start_lr) * progress
     else:
-        # SGD: StepLR
-        scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=config.lr_decay_epoch,
-            gamma=config.lr_decay,
-        )
+        # StepLR: 每 lr_decay_epoch 减半
+        effective_epoch = epoch - warmup_epochs - 1  # warmup 结束后的第一个完整 epoch 开始 decay
+        num_decays = effective_epoch // lr_decay_epoch
+        lr = sgd_lr * (lr_decay ** max(0, num_decays))
 
-    return scheduler
+    for param_group in optimizer.param_groups:
+        param_group["lr"] = lr
+    return lr
+
+
+# ============================================================
+# ASGD (Averaged SGD) — 参数平均
+# ============================================================
+
+class ASGDPolyak:
+    """
+    Polyak 平均 (参数指数移动平均)。
+
+    在训练后期维护一个 shadow copy 的参数，用 EMA 平滑：
+        shadow = decay * shadow + (1 - decay) * current_params
+
+    评估时使用 shadow 参数代替原始参数。
+    """
+
+    def __init__(self, model, decay=0.997):
+        self.model = model
+        self.decay = decay
+        self.shadow = {}
+        self._init_shadow()
+        self.num_updates = 0
+
+    def _init_shadow(self):
+        for name, param in self.model.named_parameters():
+            self.shadow[name] = param.data.clone().detach()
+
+    def update(self):
+        """在每次 optimizer.step() 后调用。"""
+        self.num_updates += 1
+        # 用 bias-corrected decay
+        decay = min(self.decay, (1 + self.num_updates) / (10 + self.num_updates))
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                self.shadow[name] = decay * self.shadow[name] + (1 - decay) * param.data
+
+    def apply_shadow(self):
+        """将 shadow 参数复制到模型中（评估前调用）。"""
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                param.data.copy_(self.shadow[name])
+
+    def state_dict(self):
+        return {
+            "shadow": self.shadow,
+            "num_updates": self.num_updates,
+            "decay": self.decay,
+        }
+
+    def load_state_dict(self, state_dict):
+        self.shadow = state_dict["shadow"]
+        self.num_updates = state_dict["num_updates"]
+        self.decay = state_dict["decay"]
 
 
 # ============================================================
@@ -297,19 +359,20 @@ def train():
             betas=config.betas,
             weight_decay=config.weight_decay,
         )
+        scheduler = create_scheduler(
+            optimizer,
+            warmup_epochs=config.warmup_epochs,
+            max_epoch=config.max_epoch,
+            min_lr=config.min_lr,
+            initial_lr=config.lr,
+        )
+        use_scheduler = True
     else:
-        optimizer = torch.optim.SGD(model.parameters(), lr=config.sgd_lr)
-
-    # 学习率调度器
-    initial_lr = config.lr if config.optimizer == "adamw" else config.sgd_lr
-    scheduler = create_scheduler(
-        optimizer,
-        warmup_epochs=config.warmup_epochs,
-        max_epoch=config.max_epoch,
-        min_lr=config.min_lr,
-        initial_lr=initial_lr,
-        optimizer_type=config.optimizer,
-    )
+        # SGD: 手动控制 LR，从 warmup_start_lr 开始
+        warmup_start = getattr(config, "warmup_start_lr", config.sgd_lr * 0.1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=warmup_start)
+        scheduler = None
+        use_scheduler = False
 
     # AMP 混合精度 (仅 CUDA 可用)
     use_amp = config.use_amp and device == "cuda"
@@ -325,25 +388,48 @@ def train():
     train_history = []
     valid_history = []
     lr_history = []
+    asgd = None
+    use_asgd = getattr(config, "use_asgd", False)
+    asgd_start = getattr(config, "asgd_start_epoch", config.max_epoch + 1)
 
     print("\n" + "=" * 60)
     print("开始训练...")
     print("=" * 60)
+    if use_asgd:
+        print(f"ASGD: 从 epoch {asgd_start} 开始对参数取平均")
 
     for epoch in range(1, config.max_epoch + 1):
         epoch_start = time.time()
-        cur_lr = get_lr(optimizer)
+
+        # SGD: 手动设置 epoch LR
+        if not use_scheduler:
+            cur_lr = set_epoch_lr(
+                optimizer, epoch,
+                warmup_epochs=config.warmup_epochs,
+                warmup_start_lr=getattr(config, "warmup_start_lr", config.sgd_lr * 0.1),
+                sgd_lr=config.sgd_lr,
+                lr_decay=config.lr_decay,
+                lr_decay_epoch=config.lr_decay_epoch,
+            )
+        else:
+            cur_lr = get_lr(optimizer)
+
         lr_history.append(cur_lr)
+
+        # ASGD: 到达启动 epoch 时创建 shadow 参数
+        if use_asgd and epoch == asgd_start:
+            asgd = ASGDPolyak(model)
+            print(f"\n  [ASGD] 开始参数平均 (epoch {epoch})")
 
         # 训练
         train_loss, train_ppl = train_epoch(
             model, train_ids, optimizer, criterion, scaler,
             config.batch_size, config.num_steps,
             config.hidden_size, config.num_layers,
-            device, epoch,
+            device, epoch, asgd=asgd,
         )
 
-        # 验证
+        # 验证（用原始参数，不用 shadow — shadow 仅用于最终测试）
         valid_loss, valid_ppl = evaluate(
             model, valid_ids,
             config.batch_size, config.num_steps,
@@ -351,8 +437,9 @@ def train():
             device,
         )
 
-        # 学习率衰减 (在每个 epoch 之后)
-        scheduler.step()
+        # 学习率衰减 (AdamW: 在每个 epoch 之后; SGD: 手动设置)
+        if use_scheduler:
+            scheduler.step()
 
         epoch_time = time.time() - epoch_start
 
@@ -362,22 +449,20 @@ def train():
 
         # 打印结果
         improved = "★" if valid_ppl < best_valid_ppl else " "
+        asgd_tag = " [ASGD]" if asgd is not None else ""
         print(f"\nEpoch {epoch:3d}/{config.max_epoch} | "
-              f"Time: {epoch_time:.1f}s | LR: {cur_lr:.2e} {improved}")
+              f"Time: {epoch_time:.1f}s | LR: {cur_lr:.2e}{asgd_tag} {improved}")
         print(f"  Train  Loss: {train_loss:.3f} | PPL: {train_ppl:.1f}")
         print(f"  Valid  Loss: {valid_loss:.3f} | PPL: {valid_ppl:.1f}")
 
-        # 保存最佳模型
+        # 保存最佳模型（用原始参数）
         if valid_ppl < best_valid_ppl:
             best_valid_ppl = valid_ppl
             best_epoch = epoch
-
-            # 获取底层模型（处理 DataParallel 包装）
-            save_model = model.module if hasattr(model, "module") else model
             save_path = os.path.join(MODEL_DIR, "best_model.pt")
             torch.save({
                 "epoch": epoch,
-                "model_state_dict": save_model.state_dict(),
+                "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "valid_ppl": valid_ppl,
                 "train_ppl": train_ppl,
@@ -396,15 +481,15 @@ def train():
         # 定期保存 checkpoint
         if epoch % config.save_every == 0:
             ckpt_path = os.path.join(MODEL_DIR, f"checkpoint_epoch{epoch}.pt")
-            save_model = model.module if hasattr(model, "module") else model
             torch.save({
                 "epoch": epoch,
-                "model_state_dict": save_model.state_dict(),
+                "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "asgd_state_dict": asgd.state_dict() if asgd else None,
             }, ckpt_path)
 
-        # 早停检查：如果 PPL 长时间不降
-        if epoch - best_epoch > 20 and config.optimizer == "sgd":
+        # 早停：SGD 下如果 PPL 长时间不降
+        if epoch - best_epoch > 20 and config.optimizer == "sgd" and epoch > 50:
             print(f"\n  验证 PPL 已 {epoch - best_epoch} 轮未改善，提前停止。")
             break
 
@@ -415,11 +500,9 @@ def train():
 
     best_ckpt = torch.load(os.path.join(MODEL_DIR, "best_model.pt"),
                            map_location=device)
+    model.load_state_dict(best_ckpt["model_state_dict"])
 
-    # 加载到模型（处理 DataParallel）
-    save_model = model.module if hasattr(model, "module") else model
-    save_model.load_state_dict(best_ckpt["model_state_dict"])
-
+    # 测试 1: 用原始最佳参数
     test_loss, test_ppl = evaluate(
         model, test_ids,
         config.batch_size, config.num_steps,
@@ -427,16 +510,32 @@ def train():
         device,
     )
 
+    # 测试 2: 用 ASGD 平均参数 (如果有)
+    test_ppl_asgd = None
+    if asgd is not None:
+        asgd.apply_shadow()
+        test_loss_asgd, test_ppl_asgd = evaluate(
+            model, test_ids,
+            config.batch_size, config.num_steps,
+            config.hidden_size, config.num_layers,
+            device,
+        )
+        # 恢复原始参数
+        model.load_state_dict(best_ckpt["model_state_dict"])
+
     print(f"\n{'='*60}")
     print(f"最终结果 (最佳 epoch: {best_epoch}):")
-    print(f"  验证 PPL:   {best_valid_ppl:.1f}")
-    print(f"  测试 PPL:   {test_ppl:.1f}")
-    print(f"  目标 PPL:   < 80")
-    status = "✓ 达标!" if test_ppl < 80 else "✗ 未达标，考虑训练更久或调整超参数"
-    print(f"  达标判断:   {status}")
+    print(f"  验证 PPL:        {best_valid_ppl:.1f}")
+    print(f"  测试 PPL (原始):  {test_ppl:.1f}")
+    if test_ppl_asgd is not None:
+        print(f"  测试 PPL (ASGD):  {test_ppl_asgd:.1f}")
+    final_ppl = test_ppl_asgd if test_ppl_asgd is not None else test_ppl
+    print(f"  目标 PPL:        < 80")
+    status = "✓ 达标!" if final_ppl < 80 else "✗ 未达标"
+    print(f"  达标判断:        {status}")
     print(f"{'='*60}")
 
-    return model, train_history, valid_history, best_valid_ppl, test_ppl
+    return model, train_history, valid_history, best_valid_ppl, final_ppl
 
 
 if __name__ == "__main__":

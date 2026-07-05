@@ -134,12 +134,77 @@ class OptimizedMediumConfig:
     save_every = 1
 
 
+class OptimizedLargeConfig:
+    """
+    优化版大模型配置 — 目标测试 PPL < 80。
+
+    设计思路:
+      - Large 模型 (hidden=1500) 是 Zaremba 论文中唯一能达到 <80 PPL 的配置
+      - 回归 SGD + 手动 LR 减半 (论文原版策略，比 AdamW 在 LSTM LM 上更优)
+      - Weight Tying 减少参数量 (66M → 51M)，同时作为正则化
+      - 线性 warmup 防止训练初期震荡
+      - ASGD (Averaged SGD) 收尾：训练最后阶段对参数取平均，稳定收敛
+      - AMP 混合精度加速 (T4 支持 FP16)
+
+    训练节奏 (参考 Zaremba 2015):
+      Epoch   1-2 : warmup (lr: 0.1 → 1.0)
+      Epoch  3-16 : lr = 1.0   (14 epochs)
+      Epoch 17-30 : lr = 0.5   (14 epochs, 减半)
+      Epoch 31-44 : lr = 0.25  (14 epochs, 减半)
+      Epoch 45-58 : lr = 0.125 (14 epochs, 减半)
+      Epoch 59-70 : lr = 0.0625(12 epochs, 精细收敛)
+      ASGD 从 epoch 50 开始
+    """
+    # ========== 数据 ==========
+    batch_size = 32              # Large 模型显存占用更大，batch 不宜过高
+    num_steps = 35               # BPTT 展开步数 (与论文一致)
+    vocab_size = 10000
+
+    # ========== 模型结构 ==========
+    hidden_size = 1500           # Large: 1500 (论文 Large 配置)
+    num_layers = 2
+    embedding_size = 1500        # 与 hidden_size 一致 (weight tying 要求)
+    dropout = 0.65               # Large 用 0.65 (论文原值)
+    init_scale = 0.04            # Large 用 0.04 (论文原值)
+    use_weight_tying = True
+
+    # ========== 优化器 (SGD) ==========
+    optimizer = "sgd"            # SGD 在 LSTM LM 上比 AdamW 效果更好
+    sgd_lr = 1.0                 # 初始学习率 (论文原值)
+    lr_decay = 0.5               # 每次衰减 ×0.5 (论文原值: halve)
+    lr_decay_epoch = 14          # 每 14 个 epoch 衰减一次
+    # AdamW 回退参数
+    lr = 0.001
+    weight_decay = 1e-5
+    betas = (0.9, 0.999)
+
+    # ========== 训练 ==========
+    max_epoch = 70               # 比论文 55 多 15 epoch 以保证充分收敛
+    warmup_epochs = 2            # 前 2 epoch 从 0.1→1.0 线性 warmup
+    warmup_start_lr = 0.1        # warmup 起始学习率
+    min_lr = 1e-6
+    max_grad_norm = 10.0         # Large 用 10 (论文原值)
+
+    # ========== ASGD ==========
+    use_asgd = True              # 启用 Averaged SGD
+    asgd_start_epoch = 50        # 从第 50 epoch 开始对参数取平均
+
+    # ========== 硬件 ==========
+    use_amp = True               # AMP 混合精度 (T4 支持 FP16)
+
+    # ========== 日志 ==========
+    log_interval = 100
+    save_every = 1
+
+
 # ============ 选择当前配置 ============
-# 可以改为 SmallConfig / MediumConfig / LargeConfig / OptimizedMediumConfig
+# 可以改为 SmallConfig / MediumConfig / LargeConfig /
+#          OptimizedMediumConfig / OptimizedLargeConfig
 # config = SmallConfig()
 # config = MediumConfig()
 # config = LargeConfig()
-config = OptimizedMediumConfig()
+# config = OptimizedMediumConfig()
+config = OptimizedLargeConfig()
 
 
 # ============ 训练通用设置 ============
