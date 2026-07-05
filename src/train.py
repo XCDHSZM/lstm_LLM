@@ -369,7 +369,7 @@ def train():
         print(f"  如需利用多 GPU，建议使用 DistributedDataParallel (需要 torchrun)")
 
     # ========== 损失函数 & 优化器 ==========
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1) # 增加 0.1 的平滑度
+    criterion = nn.CrossEntropyLoss() 
 
     if config.optimizer == "adamw":
         optimizer = torch.optim.AdamW(
