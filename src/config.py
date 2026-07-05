@@ -123,7 +123,7 @@ class OptimizedMediumConfig:
     optimizer = "sgd"
     sgd_lr = 15.0                # 保持大学习率，提供跳出局部最优的动能
     lr_decay = 0.85              
-    lr_decay_epoch = 15
+    lr_decay_epoch = 30
 
     # ========== 训练 ==========
     # max_epoch = 100              # 足够长的训练
