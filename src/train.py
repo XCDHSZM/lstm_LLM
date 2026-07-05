@@ -27,7 +27,7 @@ except ImportError:
 
 from config import config, MODEL_DIR, device
 from data_loader import preprocess_data, batch_generator
-from model import Model
+from model import LSTMLanguageModel, LSTMLanguageModelTied
 
 
 # ============================================================
@@ -309,7 +309,7 @@ def train():
     print(f"配置: hidden={config.hidden_size}, layers={config.num_layers}, "
           f"embed={config.embedding_size}, dropout={config.dropout}")
     print(f"优化器: {config.optimizer.upper()}")
-    print(f"Weight Tying: {'启用' if config.use_weight_tying else '禁用'}")
+    print(f"Weight Tying: {'启用' if getattr(config, 'use_weight_tying', False) else '禁用'}")
     print(f"AMP 混合精度: {'启用' if config.use_amp else '禁用'}")
     print(f"训练参数: batch={config.batch_size}, steps={config.num_steps}, "
           f"epochs={config.max_epoch}")
@@ -329,7 +329,15 @@ def train():
     print(f"词表大小: {len(vocab)}")
 
     # ========== 构建模型 ==========
-    model = Model(
+    # 根据配置选择模型类型
+    if getattr(config, "use_weight_tying", False):
+        ModelClass = LSTMLanguageModelTied
+        assert config.embedding_size == config.hidden_size, \
+            "Weight tying requires embedding_size == hidden_size"
+    else:
+        ModelClass = LSTMLanguageModel
+
+    model = ModelClass(
         vocab_size=len(vocab),
         embedding_size=config.embedding_size,
         hidden_size=config.hidden_size,
