@@ -237,6 +237,43 @@ class GuaranteedConfig:
     log_interval = 100
     save_every = 40              # 改为 40，防止 Kaggle 硬盘又爆掉，反正 train.py 会自动存 best_model.pt
 
+
+class ClassicZarembaConfig:
+    """
+    100% 严格复现 Zaremba (2015) 论文的 Large 圣经配置。
+    摒弃一切现代花哨技巧（无 AdamW, 无 Weight Tying），纯靠 SGD 的正则化动力学破 80。
+    """
+    # ========== 数据 ==========
+    batch_size = 20              
+    num_steps = 35               
+    vocab_size = 10000
+
+    # ========== 模型结构 ==========
+    hidden_size = 1500
+    num_layers = 2
+    embedding_size = 1500        
+    dropout = 0.65               # 原版大模型的灵魂：极高的 Dropout
+    init_scale = 0.04            # 原版的均匀分布初始化范围
+    
+    # 🚨 极其关键：绝对不能开 Weight Tying！
+    # 原版 SGD lr=1 配合 Weight Tying 会导致 Embedding 梯度爆炸或次优解
+    use_weight_tying = False      
+
+    # ========== 复古优化器 (SGD) ==========
+    optimizer = "sgd"          
+    sgd_lr = 1.0                 # 看起来极度危险的 1.0，但对这个特定架构是完美的
+    lr_decay = 1.0 / 1.15        # 精确的 0.8695 衰减率
+    lr_decay_epoch = 14          # 前 14 轮绝不衰减，让它在整个空间剧烈震荡寻找平缓极小值
+
+    # ========== 训练节奏 ==========
+    max_epoch = 55               # 论文原定的 55 轮
+    warmup_epochs = 0            # SGD 不需要 warmup
+    max_grad_norm = 10.0         # 🚨 论文中 Large 必须是 10.0，不是 5.0！允许更大的梯度流动
+
+    # ========== 硬件与日志 ==========
+    use_amp = True               # 保持 FP16 加速
+    log_interval = 100
+    save_every = 55              # 禁用中间检查点，只存 best_model，保 Kaggle 硬盘
 # ============ 选择当前配置 ============
 # 可以改为 SmallConfig / MediumConfig / LargeConfig /
 #          OptimizedMediumConfig / OptimizedLargeConfig
@@ -245,7 +282,8 @@ class GuaranteedConfig:
 # config = LargeConfig()
 # config = OptimizedMediumConfig()
 # config = OptimizedLargeConfig()
-config = GuaranteedConfig()
+# config = GuaranteedConfig()
+config = ClassicZarembaConfig()
 
 
 # ============ 训练通用设置 ============
