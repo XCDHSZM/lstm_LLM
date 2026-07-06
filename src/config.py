@@ -213,16 +213,16 @@ class GuaranteedConfig:
 
     # ========== 模型结构 ==========
     # 使用 Medium 大小足以破 80，训练速度提升一倍
-    hidden_size = 650
+    hidden_size = 1500           # 容量翻倍：从 650 直接拉满到 1500
     num_layers = 2
-    embedding_size = 650         
-    dropout = 0.50               
-    init_scale = 0.05
+    embedding_size = 1500      
+    dropout = 0.65               
+    init_scale = 0.04
     use_weight_tying = True      # 开启权重共享，大幅提升泛化能力！
 
     # ========== 现代优化器 (AdamW) ==========
     optimizer = "adamw"          
-    lr = 0.002                   # AdamW 推荐峰值学习率
+    lr = 0.001                   # AdamW 推荐峰值学习率
     weight_decay = 1e-5          # 轻微正则化
     betas = (0.9, 0.999)         
 
