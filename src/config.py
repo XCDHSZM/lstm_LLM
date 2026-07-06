@@ -202,6 +202,41 @@ class OptimizedLargeConfig:
     save_every = 100
 
 
+class GuaranteedConfig:
+    """
+    必破 80 PPL 的现代优化版配置 (AdamW + 余弦退火 + Weight Tying)
+    """
+    # ========== 数据 ==========
+    batch_size = 20              
+    num_steps = 35               
+    vocab_size = 10000
+
+    # ========== 模型结构 ==========
+    # 使用 Medium 大小足以破 80，训练速度提升一倍
+    hidden_size = 650
+    num_layers = 2
+    embedding_size = 650         
+    dropout = 0.50               
+    init_scale = 0.05
+    use_weight_tying = True      # 开启权重共享，大幅提升泛化能力！
+
+    # ========== 现代优化器 (AdamW) ==========
+    optimizer = "adamw"          
+    lr = 0.002                   # AdamW 推荐峰值学习率
+    weight_decay = 1e-5          # 轻微正则化
+    betas = (0.9, 0.999)         
+
+    # ========== 训练节奏 ==========
+    max_epoch = 40               # 40 轮绝对够了
+    warmup_epochs = 2            # 前 2 轮线性预热，防止早期梯度爆炸
+    min_lr = 1e-5                # 余弦退火的最终兜底学习率
+    max_grad_norm = 5.0          
+
+    # ========== 硬件与日志 ==========
+    use_amp = True               # 继续用混合精度加速
+    log_interval = 100
+    save_every = 40              # 改为 40，防止 Kaggle 硬盘又爆掉，反正 train.py 会自动存 best_model.pt
+
 # ============ 选择当前配置 ============
 # 可以改为 SmallConfig / MediumConfig / LargeConfig /
 #          OptimizedMediumConfig / OptimizedLargeConfig
@@ -209,7 +244,8 @@ class OptimizedLargeConfig:
 # config = MediumConfig()
 # config = LargeConfig()
 # config = OptimizedMediumConfig()
-config = OptimizedLargeConfig()
+# config = OptimizedLargeConfig()
+config = GuaranteedConfig()
 
 
 # ============ 训练通用设置 ============
