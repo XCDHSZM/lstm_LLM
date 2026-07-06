@@ -175,7 +175,7 @@ class OptimizedLargeConfig:
     embedding_size = 1500         # 论文: embedding=hidden, 但不用 tying
     dropout = 0.65                # 论文 Large 原值
     init_scale = 0.04             # 论文 Large 原值
-    use_weight_tying = True    # ★ 关键: 不用 weight tying!
+    use_weight_tying = False    # ★ 关键: 不用 weight tying!
     # Weight Tying + SGD lr=1.0 会导致 Embedding 梯度爆炸
     # 详见: Press & Wolf (2016) 指出 tying 需要专门的优化策略
 
@@ -199,7 +199,7 @@ class OptimizedLargeConfig:
 
     # ========== 日志 ==========
     log_interval = 100
-    save_every = 1
+    save_every = 100
 
 
 # ============ 选择当前配置 ============
